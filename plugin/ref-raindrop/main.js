@@ -7,6 +7,7 @@ const {
 } = require("obsidian");
 
 const RAINDROP_PER_PAGE = 50;
+const RAINDROP_MAX_PAGES_PER_SYNC = 10000;
 const RAINDROP_RETRY_MAX_DELAY_MS = 120000;
 
 const DEFAULT_SETTINGS = {
@@ -935,6 +936,9 @@ async function fetchAllRaindrops(token, timeoutSec, sinceLastUpdate) {
   let page = 0;
   let reachedKnownRevision = false;
   while (true) {
+    if (page >= RAINDROP_MAX_PAGES_PER_SYNC) {
+      throw new Error(`Raindrop pagination exceeded ${RAINDROP_MAX_PAGES_PER_SYNC} pages; aborting sync.`);
+    }
     const data = await requestRaindropJsonWithRetry(normalizedToken, "/raindrops/0", {
       page,
       perpage: RAINDROP_PER_PAGE,
