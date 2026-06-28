@@ -147,6 +147,8 @@ AI設定:
 - `Page request timeout seconds`: 既定 `20`
 - `Ollama timeout seconds`: 既定 `120`。OpenAI/Gemini のAI生成タイムアウトにも使う
 - `Raindrop timeout seconds`: 既定 `30`
+- `Max AI indexes per run`: 既定 `25`。`0` で無制限
+- `Delay between AI indexes milliseconds`: 既定 `1000`。`0` で待ちなし
 
 APIキーはObsidianのプラグイン設定データに保存されます。同期ノートのfrontmatterや本文には書き込みません。Git管理対象にも入れないでください。
 
@@ -195,6 +197,8 @@ Command Palette から実行します。
 - `RefRaindrop: Reload AI summarize ignore file`
 
 まずは `Sync Raindrop bookmarks` だけ実行し、Markdownの作成と更新が期待通りか確認してください。AI indexはその後です。
+
+初回AI indexは意図的に抑制しています。既定では1回あたり最大25件、各ページ取得の間に1000ms待ちます。初回取り込み時に多数のブックマーク先へ一気にアクセスしないための設定です。
 
 ## アクセス禁止 host
 

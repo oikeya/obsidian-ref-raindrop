@@ -34,6 +34,8 @@ const DEFAULT_SETTINGS = {
   requestTimeoutSec: 20,
   ollamaTimeoutSec: 120,
   raindropTimeoutSec: 30,
+  maxIndexPerRun: 25,
+  indexDelayMs: 1000,
   maxPageChars: 20000,
   blockPrivateNetworks: true,
 };
@@ -303,8 +305,19 @@ module.exports = class AiBookmarkIndexerPlugin extends Plugin {
     let skipped = 0;
     let failed = 0;
     let ignored = 0;
+    let deferred = 0;
     const failures = [];
-    for (const file of uniqueFiles(files)) {
+    const unique = uniqueFiles(files);
+    const limit = nonNegativeInt(this.settings.maxIndexPerRun, DEFAULT_SETTINGS.maxIndexPerRun);
+    const delayMs = nonNegativeInt(this.settings.indexDelayMs, DEFAULT_SETTINGS.indexDelayMs);
+    let attempted = 0;
+
+    for (const file of unique) {
+      if (limit > 0 && attempted >= limit) {
+        deferred += 1;
+        continue;
+      }
+      attempted += 1;
       const result = await this.processFile(file, force);
       if (result.status === "updated") updated += 1;
       else if (result.status === "failed") {
@@ -314,8 +327,11 @@ module.exports = class AiBookmarkIndexerPlugin extends Plugin {
       else if (result.status === "ignored") ignored += 1;
       else skipped += 1;
       console.log(`RefRaindrop: ${file.path}: ${result.status} ${result.message}`);
+      if (delayMs > 0 && attempted < unique.length && (limit === 0 || attempted < limit)) {
+        await sleep(delayMs);
+      }
     }
-    let message = `RefRaindrop: indexed updated ${updated}, ignored ${ignored}, skipped ${skipped}, failed ${failed}.`;
+    let message = `RefRaindrop: indexed updated ${updated}, ignored ${ignored}, skipped ${skipped}, failed ${failed}, deferred ${deferred}.`;
     if (failures.length > 0) message += ` First failure: ${failures[0]}`;
     new Notice(message, failures.length > 0 ? 15000 : 5000);
   }
@@ -632,6 +648,36 @@ class AiBookmarkIndexerSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         });
       });
+
+    new Setting(containerEl)
+      .setName("Max AI indexes per run")
+      .setDesc("Limits page fetches during large initial imports. Use 0 for unlimited.")
+      .addText((text) => {
+        text.setValue(String(this.plugin.settings.maxIndexPerRun)).onChange(async (value) => {
+          this.plugin.settings.maxIndexPerRun = value;
+          await this.plugin.saveSettings();
+        });
+        text.inputEl.addEventListener("blur", async () => {
+          this.plugin.settings.maxIndexPerRun = nonNegativeInt(this.plugin.settings.maxIndexPerRun, DEFAULT_SETTINGS.maxIndexPerRun);
+          text.setValue(String(this.plugin.settings.maxIndexPerRun));
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Delay between AI indexes milliseconds")
+      .setDesc("Adds a delay between bookmark page fetches. Use 0 for no delay.")
+      .addText((text) => {
+        text.setValue(String(this.plugin.settings.indexDelayMs)).onChange(async (value) => {
+          this.plugin.settings.indexDelayMs = value;
+          await this.plugin.saveSettings();
+        });
+        text.inputEl.addEventListener("blur", async () => {
+          this.plugin.settings.indexDelayMs = nonNegativeInt(this.plugin.settings.indexDelayMs, DEFAULT_SETTINGS.indexDelayMs);
+          text.setValue(String(this.plugin.settings.indexDelayMs));
+          await this.plugin.saveSettings();
+        });
+      });
   }
 
   renderAccount(containerEl, account, index) {
@@ -736,6 +782,8 @@ function normalizeSettings(settings) {
   merged.outputLanguage = normalizeOutputLanguage(merged.outputLanguage);
   merged.runOnStartup = Boolean(merged.runOnStartup);
   merged.startupIndexAfterSync = Boolean(merged.startupIndexAfterSync);
+  merged.maxIndexPerRun = nonNegativeInt(merged.maxIndexPerRun, DEFAULT_SETTINGS.maxIndexPerRun);
+  merged.indexDelayMs = nonNegativeInt(merged.indexDelayMs, DEFAULT_SETTINGS.indexDelayMs);
   if (!Array.isArray(merged.accounts) || merged.accounts.length === 0) {
     merged.accounts = DEFAULT_SETTINGS.accounts.map((account) => Object.assign({}, account));
   }
@@ -1817,6 +1865,11 @@ function withTimeout(promise, ms, message) {
 function positiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function nonNegativeInt(value, fallback) {
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function timeoutValue(value, fallback) {
