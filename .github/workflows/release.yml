@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run release checks
+        run: PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests
+
+      - name: Validate tag matches manifest version
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = json.load(open("manifest.json", encoding="utf-8"))["version"]
+          accepted = {version, f"v{version}"}
+          if tag not in accepted:
+              print(f"Tag {tag} does not match manifest version {version}. Expected one of: {sorted(accepted)}.", file=sys.stderr)
+              sys.exit(1)
+          PY
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p dist
+          cp plugin/ref-raindrop/main.js dist/main.js
+          cp manifest.json dist/manifest.json
+          cp plugin/ref-raindrop/styles.css dist/styles.css
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: RefRaindrop ${{ github.ref_name }}
+          files: |
+            dist/main.js
+            dist/manifest.json
+            dist/styles.css
