@@ -8,6 +8,12 @@ It is designed for using bookmarks as a lightweight knowledge base for later AI-
 
 The name "RefRaindrop" is a wordplay on "reference", "refrain", and "Raindrop". This project is an independent community plugin and is not affiliated with or endorsed by Obsidian or Raindrop.io.
 
+## Disclaimer
+
+RefRaindrop is provided as-is under the MIT License. You are responsible for configuring and monitoring any third-party services used with it, including Raindrop.io, OpenAI, Gemini, Ollama, and network access to bookmarked websites.
+
+AI providers and SaaS APIs may incur charges, fail with quota/rate-limit errors, or change their behavior. RefRaindrop includes throttling, ignored-host rules, private-network blocking, and retry handling, but it cannot guarantee cost limits, availability, accuracy, or that every bookmarked website is safe or appropriate to fetch. Review the settings before running large imports or AI indexing.
+
 ## Features
 
 - Sync all bookmarks from the Raindrop API
@@ -168,6 +174,8 @@ Raindrop:
 
 The plugin uses the token to read your Raindrop bookmarks. It does not write back to Raindrop.
 
+Raindrop sync uses the API maximum page size of 50 items per request. After the first full sync, RefRaindrop stops fetching when Raindrop's `lastUpdate` reaches the newest `raindrop_last_update` already stored in the vault. A vault folder deletion or empty destination folder causes the next sync to fetch all bookmarks again.
+
 OpenAI:
 
 1. Open <https://platform.openai.com/api-keys>.
@@ -200,6 +208,8 @@ Run commands from the Command Palette:
 Start with `Sync Raindrop bookmarks` and verify the generated Markdown before running AI indexing.
 
 Initial AI indexing is intentionally throttled. By default, RefRaindrop indexes at most 25 bookmarks per run and waits 1000 ms between page fetches. This avoids hitting many bookmarked websites in a burst during the first import.
+
+Raindrop API rate limits are retried automatically for HTTP 429 and temporary 5xx responses. If Raindrop sends `Retry-After`, RefRaindrop waits for it, capped at 120 seconds.
 
 ## Ignored Hosts
 

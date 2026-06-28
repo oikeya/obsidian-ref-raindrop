@@ -46,7 +46,6 @@ frontmatter:
 - `raindrop_created`
 - `raindrop_last_update`
 - `raindrop_cover`
-- `banner`
 - `raindrop_synced_at`
 
 body:

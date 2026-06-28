@@ -6,6 +6,10 @@ const {
   requestUrl,
 } = require("obsidian");
 
+const RAINDROP_PER_PAGE = 50;
+const RAINDROP_MAX_PAGES_PER_SYNC = 10000;
+const RAINDROP_RETRY_MAX_DELAY_MS = 120000;
+
 const DEFAULT_SETTINGS = {
   accounts: [
     {
@@ -30,6 +34,7 @@ const DEFAULT_SETTINGS = {
   requestTimeoutSec: 20,
   ollamaTimeoutSec: 120,
   raindropTimeoutSec: 30,
+  raindropMaxRetries: 5,
   maxIndexPerRun: 25,
   indexDelayMs: 1000,
   maxPageChars: 20000,
@@ -181,15 +186,18 @@ module.exports = class AiBookmarkIndexerPlugin extends Plugin {
 
   async syncAccount(account) {
     const folder = accountFolder(account);
-    const raindrops = await fetchAllRaindrops(account.token, timeoutValue(this.settings.raindropTimeoutSec, DEFAULT_SETTINGS.raindropTimeoutSec));
+    await ensureVaultFolder(this.app, folder);
     const index = await this.buildSyncedNoteIndex(account);
+    const raindrops = await fetchAllRaindrops(
+      account.token,
+      timeoutValue(this.settings.raindropTimeoutSec, DEFAULT_SETTINGS.raindropTimeoutSec),
+      index.latestLastUpdate
+    );
     let created = 0;
     let updated = 0;
     let unchanged = 0;
     let failed = 0;
     const touchedFiles = [];
-
-    await ensureVaultFolder(this.app, folder);
 
     for (const raw of raindrops) {
       const item = raindropFromApi(raw);
@@ -225,6 +233,7 @@ module.exports = class AiBookmarkIndexerPlugin extends Plugin {
     const folder = accountFolder(account);
     const byId = new Map();
     const byUrl = new Map();
+    let latestLastUpdate = "";
     const files = this.app.vault
       .getMarkdownFiles()
       .filter((file) => file.path === folder || file.path.startsWith(`${folder}/`));
@@ -236,10 +245,12 @@ module.exports = class AiBookmarkIndexerPlugin extends Plugin {
       if (accountName && accountName !== account.name) continue;
       const id = String(fm.raindrop_id || fm.id || "");
       const url = getUrlFromValue(fm.source) || getUrlFromValue(fm.url);
+      const lastUpdate = String(fm.raindrop_last_update || fm.lastupdate || "");
       if (id) byId.set(id, file);
       if (url) byUrl.set(url, file);
+      latestLastUpdate = newerIsoString(latestLastUpdate, lastUpdate);
     }
-    return { byId, byUrl };
+    return { byId, byUrl, latestLastUpdate };
   }
 
   async createRaindropNote(account, item) {
@@ -915,27 +926,53 @@ async function ensureVaultFolder(app, folder) {
 async function fetchRaindropUser(token, timeoutSec) {
   const normalizedToken = String(token || "").trim();
   if (!normalizedToken) throw new Error("missing token");
-  return await requestRaindropJson(normalizedToken, "/user", {}, timeoutSec);
+  return await requestRaindropJsonWithRetry(normalizedToken, "/user", {}, timeoutSec);
 }
 
-async function fetchAllRaindrops(token, timeoutSec) {
+async function fetchAllRaindrops(token, timeoutSec, sinceLastUpdate) {
   const normalizedToken = String(token || "").trim();
   if (!normalizedToken) throw new Error("missing token");
   const items = [];
   let page = 0;
-  const perpage = 50;
+  let reachedKnownRevision = false;
   while (true) {
-    const data = await requestRaindropJson(normalizedToken, "/raindrops/0", {
+    if (page >= RAINDROP_MAX_PAGES_PER_SYNC) {
+      throw new Error(`Raindrop pagination exceeded ${RAINDROP_MAX_PAGES_PER_SYNC} pages; aborting sync.`);
+    }
+    const data = await requestRaindropJsonWithRetry(normalizedToken, "/raindrops/0", {
       page,
-      perpage,
+      perpage: RAINDROP_PER_PAGE,
       sort: "-lastUpdate",
     }, timeoutSec);
     const pageItems = Array.isArray(data.items) ? data.items : [];
-    items.push(...pageItems);
-    if (pageItems.length < perpage) break;
+    for (const item of pageItems) {
+      if (!isNewerLastUpdate(item && item.lastUpdate, sinceLastUpdate)) {
+        reachedKnownRevision = true;
+        break;
+      }
+      items.push(item);
+    }
+    if (reachedKnownRevision || pageItems.length < RAINDROP_PER_PAGE) break;
     page += 1;
   }
   return items;
+}
+
+async function requestRaindropJsonWithRetry(token, apiPath, params, timeoutSec) {
+  let lastError = null;
+  const maxRetries = nonNegativeInt(DEFAULT_SETTINGS.raindropMaxRetries, 3);
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      return await requestRaindropJson(token, apiPath, params, timeoutSec);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableRaindropError(error) || attempt >= maxRetries) break;
+      const waitMs = retryDelayMs(error, attempt);
+      console.warn(`RefRaindrop: Raindrop rate limited; retrying in ${waitMs} ms`, error);
+      await sleep(waitMs);
+    }
+  }
+  throw lastError;
 }
 
 async function requestRaindropJson(token, apiPath, params, timeoutSec) {
@@ -956,10 +993,51 @@ async function requestRaindropJson(token, apiPath, params, timeoutSec) {
     timeoutSec * 1000,
     "raindrop request timed out"
   );
-  if (response.status >= 400) throw new Error(`Raindrop HTTP ${response.status}`);
+  if (response.status >= 400) throw raindropHttpError(response);
   const data = JSON.parse(response.text);
   if (data.result === false) throw new Error("Raindrop API returned result=false");
   return data;
+}
+
+function raindropHttpError(response) {
+  const detail = compactMessage(response && response.text).slice(0, 200);
+  const error = new Error(`Raindrop HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+  error.status = response.status;
+  error.retryAfterMs = retryAfterMs(response && response.headers);
+  if (Number(response.status) === 429) {
+    error.displayMessage = "Raindrop HTTP 429: rate limited; wait and sync again.";
+  }
+  return error;
+}
+
+function isRetryableRaindropError(error) {
+  const status = Number(error && error.status);
+  return status === 429 || (status >= 500 && status < 600);
+}
+
+function retryDelayMs(error, attempt) {
+  const retryAfter = Number(error && error.retryAfterMs);
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return Math.min(retryAfter, RAINDROP_RETRY_MAX_DELAY_MS);
+  return Math.min(2000 * Math.pow(2, attempt), RAINDROP_RETRY_MAX_DELAY_MS);
+}
+
+function retryAfterMs(headers) {
+  const value = headerValue(headers, "retry-after");
+  if (!value) return 0;
+  const seconds = Number.parseFloat(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const dateMs = Date.parse(value);
+  if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
+  return 0;
+}
+
+function headerValue(headers, name) {
+  if (!headers) return "";
+  const lowered = String(name || "").toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (String(key).toLowerCase() === lowered) return Array.isArray(value) ? String(value[0] || "") : String(value || "");
+  }
+  return "";
 }
 
 function raindropFromApi(data) {
@@ -1007,7 +1085,6 @@ function raindropFrontmatter(account, item) {
     raindrop_cover: item.cover || null,
     raindrop_synced_at: new Date().toISOString(),
   };
-  if (item.cover) props.banner = item.cover;
   return props;
 }
 
@@ -1028,7 +1105,6 @@ function buildNewRaindropMarkdown(account, item) {
 
 function renderNewBody(item) {
   const parts = [];
-  if (item.cover) parts.push(`![${item.title}](${item.cover})`, "");
   parts.push(`# ${item.title}`, "");
   parts.push("# User Notes", "", "## Raindrop Note", "", item.note || "-", "", "## Local Notes", "", "-", "");
   parts.push(renderRaindropSections(item), "");
@@ -1066,13 +1142,27 @@ function renderDetails(item) {
 }
 
 function updateSyncedBodySections(body, item) {
-  let next = ensureHeading(body, "# User Notes");
+  let next = removeLeadingMarkdownImage(body);
+  next = ensureHeading(next, "# User Notes");
   next = replaceSubsectionInUserNotes(next, "## Raindrop Note", item.note || "-");
   next = ensureSubsectionInUserNotes(next, "## Local Notes", "-");
   next = replaceTopLevelSection(next, "# Raindrop", renderRaindropSections(item));
   next = replaceDetailsSection(next, renderDetails(item));
   next = removeTopLevelSection(next, "# AI Index");
   return next.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
+function removeLeadingMarkdownImage(body) {
+  const text = String(body || "");
+  const rest = text.trimStart();
+  if (!rest.startsWith("![")) return text;
+  const altEnd = rest.indexOf("]");
+  const urlStart = rest.indexOf("(", altEnd + 1);
+  const urlEnd = rest.indexOf(")", urlStart + 1);
+  if (altEnd < 0 || urlStart !== altEnd + 1 || urlEnd < 0) return text;
+  const url = rest.slice(urlStart + 1, urlEnd).trim();
+  if (!/^https?:\/\//i.test(url)) return text;
+  return rest.slice(urlEnd + 1).replace(/^\s*\n+/, "");
 }
 
 function hasRaindropRevisionChanged(frontmatter, account, item) {
@@ -1872,6 +1962,22 @@ function nonNegativeInt(value, fallback) {
 
 function timeoutValue(value, fallback) {
   return positiveInt(value, fallback);
+}
+
+function newerIsoString(current, candidate) {
+  const currentMs = Date.parse(current || "");
+  const candidateMs = Date.parse(candidate || "");
+  if (!Number.isFinite(candidateMs)) return current || "";
+  if (!Number.isFinite(currentMs) || candidateMs > currentMs) return String(candidate || "");
+  return current || "";
+}
+
+function isNewerLastUpdate(lastUpdate, sinceLastUpdate) {
+  const sinceMs = Date.parse(sinceLastUpdate || "");
+  if (!Number.isFinite(sinceMs)) return true;
+  const lastUpdateMs = Date.parse(lastUpdate || "");
+  if (!Number.isFinite(lastUpdateMs)) return true;
+  return lastUpdateMs > sinceMs;
 }
 
 function aiHttpError(provider, response) {
