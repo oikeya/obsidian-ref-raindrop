@@ -2,3 +2,9 @@
   color: var(--text-muted);
   font-size: var(--font-ui-small);
 }
+
+.ref-raindrop-ignored-hosts {
+  min-height: 8em;
+  width: min(100%, 34em);
+  font-family: var(--font-monospace);
+}
