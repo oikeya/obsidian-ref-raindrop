@@ -1,7 +1,7 @@
 {
   "id": "ref-raindrop",
   "name": "RefRaindrop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.5.0",
   "description": "Import Raindrop.io bookmarks as AI-friendly reference notes without storing full page content.",
   "author": "oikeya",

@@ -20,7 +20,7 @@ The name "RefRaindrop" is a wordplay on "reference", "refrain", and "Raindrop". 
 - Clear `last_http_status` only when Raindrop metadata changes
 - Track AI processing and failure state with reserved `ai_summary` values
 - Configure Raindrop tokens, folders, AI provider, language, and ignore rules from Obsidian settings
-- Reload the ignore file on every sync
+- Configure ignored hosts directly in the Obsidian settings UI
 - Provide commands for sync only, AI indexing only, and sync-then-index
 
 ## Note Format
@@ -141,7 +141,7 @@ AI settings:
 - `OpenAI API key`: stored only in Obsidian plugin settings
 - `Gemini API key`: stored only in Obsidian plugin settings
 - `Output language`: language for AI summaries and index fields. Default is `Japanese`
-- `Ignore file path`: default `~/.config/ref-raindrop/.ai_summarize_ignore`
+- `Ignored hosts`: hosts that must never be fetched or summarized
 - `Block private networks`: enabled by default
 - `Sync on startup`: run one sync after Obsidian starts
 - `Index after startup sync`: also run AI indexing after startup sync
@@ -195,7 +195,7 @@ Run commands from the Command Palette:
 - `RefRaindrop: Force index current bookmark`
 - `RefRaindrop: Index all synced bookmarks`
 - `RefRaindrop: Force index all synced bookmarks`
-- `RefRaindrop: Reload AI summarize ignore file`
+- `RefRaindrop: Reload ignored hosts`
 
 Start with `Sync Raindrop bookmarks` and verify the generated Markdown before running AI indexing.
 
@@ -203,11 +203,7 @@ Initial AI indexing is intentionally throttled. By default, RefRaindrop indexes 
 
 ## Ignored Hosts
 
-Hosts that must never be fetched for AI indexing can be listed here:
-
-```text
-~/.config/ref-raindrop/.ai_summarize_ignore
-```
+Hosts that must never be fetched for AI indexing can be listed in `Settings` → `Community plugins` → `RefRaindrop` → `Ignored hosts`.
 
 Example:
 
@@ -217,8 +213,6 @@ corp.example.com
 *.internal.example.com
 https://private.example.com/path
 ```
-
-This repository includes `.ai_summarize_ignore.example` as a template. Keep your real ignore file outside Git.
 
 Matching rules:
 

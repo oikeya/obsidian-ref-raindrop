@@ -1,8 +1,0 @@
-# Hosts listed here are never fetched or summarized by RefRaindrop.
-# One host or URL per line. Blank lines and comments are ignored.
-#
-# Examples:
-# intranet.local
-# corp.example.com
-# *.internal.example.com
-# https://private.example.com/path

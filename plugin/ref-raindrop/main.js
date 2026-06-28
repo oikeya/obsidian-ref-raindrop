@@ -6,10 +6,6 @@ const {
   requestUrl,
 } = require("obsidian");
 
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
-
 const DEFAULT_SETTINGS = {
   accounts: [
     {
@@ -30,7 +26,7 @@ const DEFAULT_SETTINGS = {
   outputLanguage: "ja",
   runOnStartup: false,
   startupIndexAfterSync: false,
-  ignoreFilePath: "~/.config/ref-raindrop/.ai_summarize_ignore",
+  ignoredHosts: "",
   requestTimeoutSec: 20,
   ollamaTimeoutSec: 120,
   raindropTimeoutSec: 30,
@@ -78,7 +74,7 @@ const SYNC_FRONTMATTER_KEYS = [
 module.exports = class AiBookmarkIndexerPlugin extends Plugin {
   async onload() {
     this.settings = normalizeSettings(Object.assign({}, DEFAULT_SETTINGS, await this.loadData()));
-    this.ignoreRules = loadIgnoreRules(this.settings.ignoreFilePath);
+    await this.loadIgnoreRules();
 
     this.addCommand({
       id: "sync-raindrop-bookmarks",
@@ -111,10 +107,10 @@ module.exports = class AiBookmarkIndexerPlugin extends Plugin {
       callback: () => this.indexAll(true),
     });
     this.addCommand({
-      id: "reload-ignore-file",
-      name: "Reload AI summarize ignore file",
-      callback: () => {
-        this.ignoreRules = loadIgnoreRules(this.settings.ignoreFilePath);
+      id: "reload-ignored-hosts",
+      name: "Reload ignored hosts",
+      callback: async () => {
+        await this.loadIgnoreRules();
         new Notice(`RefRaindrop: loaded ${this.ignoreRules.length} ignore rule(s).`);
       },
     });
@@ -132,6 +128,11 @@ module.exports = class AiBookmarkIndexerPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
+  async loadIgnoreRules() {
+    this.ignoreRules = parseIgnoreRules(this.settings.ignoredHosts);
+    return this.ignoreRules;
+  }
+
   enabledAccounts() {
     return this.settings.accounts.filter((account) => account.enabled && String(account.token || "").trim() && normalizeFolder(account.folder));
   }
@@ -141,7 +142,7 @@ module.exports = class AiBookmarkIndexerPlugin extends Plugin {
   }
 
   async syncAllAccounts(indexAfterSync) {
-    this.ignoreRules = loadIgnoreRules(this.settings.ignoreFilePath);
+    await this.loadIgnoreRules();
     const accounts = this.enabledAccounts();
     if (accounts.length === 0) {
       new Notice("RefRaindrop: configure at least one enabled Raindrop account token.");
@@ -562,17 +563,19 @@ class AiBookmarkIndexerSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Ignore file path")
-      .setDesc("Hosts in this file are never fetched or summarized.")
-      .addText((text) => {
-        text.setValue(this.plugin.settings.ignoreFilePath).onChange(async (value) => {
-          this.plugin.settings.ignoreFilePath = value;
+      .setName("Ignored hosts")
+      .setDesc("Hosts listed here are never fetched or summarized. Use one host per line. Wildcards like *.example.com are supported.")
+      .addTextArea((text) => {
+        text.inputEl.rows = 6;
+        text.inputEl.addClass("ref-raindrop-ignored-hosts");
+        text.setValue(this.plugin.settings.ignoredHosts).onChange(async (value) => {
+          this.plugin.settings.ignoredHosts = value;
           await this.plugin.saveSettings();
         });
         text.inputEl.addEventListener("blur", async () => {
-          this.plugin.settings.ignoreFilePath = this.plugin.settings.ignoreFilePath.trim();
-          text.setValue(this.plugin.settings.ignoreFilePath);
-          this.plugin.ignoreRules = loadIgnoreRules(this.plugin.settings.ignoreFilePath);
+          this.plugin.settings.ignoredHosts = formatIgnoreRules(this.plugin.settings.ignoredHosts);
+          text.setValue(this.plugin.settings.ignoredHosts);
+          await this.plugin.loadIgnoreRules();
           await this.plugin.saveSettings();
         });
       });
@@ -782,6 +785,7 @@ function normalizeSettings(settings) {
   merged.outputLanguage = normalizeOutputLanguage(merged.outputLanguage);
   merged.runOnStartup = Boolean(merged.runOnStartup);
   merged.startupIndexAfterSync = Boolean(merged.startupIndexAfterSync);
+  merged.ignoredHosts = String(merged.ignoredHosts || "");
   merged.maxIndexPerRun = nonNegativeInt(merged.maxIndexPerRun, DEFAULT_SETTINGS.maxIndexPerRun);
   merged.indexDelayMs = nonNegativeInt(merged.indexDelayMs, DEFAULT_SETTINGS.indexDelayMs);
   if (!Array.isArray(merged.accounts) || merged.accounts.length === 0) {
@@ -1268,23 +1272,17 @@ function getUrlFromValue(value) {
   return /^https?:\/\//i.test(text) ? text : "";
 }
 
-function expandHome(filePath) {
-  const text = String(filePath || "").trim();
-  if (text === "~") return os.homedir();
-  if (text.startsWith("~/")) return path.join(os.homedir(), text.slice(2));
-  return text;
-}
-
-function loadIgnoreRules(ignoreFilePath) {
-  const expanded = expandHome(ignoreFilePath || DEFAULT_SETTINGS.ignoreFilePath);
-  if (!expanded || !fs.existsSync(expanded)) return [];
-  return fs
-    .readFileSync(expanded, "utf8")
+function parseIgnoreRules(text) {
+  return String(text || "")
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"))
     .map(normalizeIgnoreRule)
     .filter(Boolean);
+}
+
+function formatIgnoreRules(text) {
+  return parseIgnoreRules(text).join("\n");
 }
 
 function normalizeIgnoreRule(rule) {

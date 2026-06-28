@@ -47,6 +47,12 @@ class RefRaindropReleaseTest(unittest.TestCase):
         self.assertEqual(text.count("("), text.count(")"))
         self.assertEqual(text.count("["), text.count("]"))
 
+    def test_no_direct_filesystem_access(self):
+        text = (PLUGIN / "main.js").read_text()
+        forbidden = ['require("fs")', 'require("os")', 'require("path")', "fs.", "os.homedir", "path.join"]
+        for word in forbidden:
+            self.assertNotIn(word, text)
+
     def test_old_agent_branding_is_not_in_release_files(self):
         paths = [
             ROOT / "README.md",

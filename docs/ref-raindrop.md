@@ -22,7 +22,7 @@ The plugin owns a narrow set of frontmatter fields and body sections so sync can
 - Clear `last_http_status` only when Raindrop-derived data changes
 - Generate AI summaries/index fields inside the same plugin
 - Support Ollama, OpenAI, and Gemini as AI providers
-- Reload the ignore file on every sync
+- Read ignored hosts from plugin settings on every sync
 - Optionally sync on Obsidian startup
 - Allow the AI output language to be selected from settings
 
@@ -89,10 +89,4 @@ ai_summary: __AI_FAILED__
 
 Notes with either reserved value are retried on the next AI indexing run even if `last_http_status` exists.
 
-Hosts matching `.ai_summarize_ignore` are never fetched.
-
-Default ignore file:
-
-```text
-~/.config/ref-raindrop/.ai_summarize_ignore
-```
+Hosts matching `Ignored hosts` in the plugin settings are never fetched.
