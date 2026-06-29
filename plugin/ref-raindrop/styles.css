@@ -1,10 +1,15 @@
 .ref-raindrop-setting-note {
   color: var(--text-muted);
   font-size: var(--font-ui-small);
+  margin: 0.25rem 0 0.75rem;
 }
 
 .ref-raindrop-ignored-hosts {
   min-height: 8em;
   width: min(100%, 34em);
   font-family: var(--font-monospace);
+}
+
+.ref-raindrop-warning-note {
+  color: var(--text-warning);
 }

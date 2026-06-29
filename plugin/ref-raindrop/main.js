@@ -35,10 +35,11 @@ const DEFAULT_SETTINGS = {
   ollamaTimeoutSec: 120,
   raindropTimeoutSec: 30,
   raindropMaxRetries: 5,
-  maxIndexPerRun: 25,
+  maxIndexPerRun: 50,
   indexDelayMs: 1000,
   maxPageChars: 20000,
   blockPrivateNetworks: true,
+  lastIndexResult: null,
 };
 
 const AI_KEYS = [
@@ -343,7 +344,23 @@ module.exports = class AiBookmarkIndexerPlugin extends Plugin {
         await sleep(delayMs);
       }
     }
-    let message = `RefRaindrop: indexed updated ${updated}, ignored ${ignored}, skipped ${skipped}, failed ${failed}, deferred ${deferred}.`;
+    const limitReached = limit > 0 && deferred > 0;
+    const result = {
+      updated,
+      ignored,
+      skipped,
+      failed,
+      deferred,
+      limit,
+      limitReached,
+      finishedAt: new Date().toISOString(),
+      firstFailure: failures[0] || "",
+    };
+    this.settings.lastIndexResult = result;
+    await this.saveSettings();
+
+    let message = `RefRaindrop: indexed ${updated}, skipped ${skipped}, failed ${failed}, deferred ${deferred}.`;
+    if (limitReached) message += ` Safety limit ${limit}/run reached.`;
     if (failures.length > 0) message += ` First failure: ${failures[0]}`;
     new Notice(message, failures.length > 0 ? 15000 : 5000);
   }
@@ -449,6 +466,8 @@ class AiBookmarkIndexerSettingTab extends PluginSettingTab {
       );
 
     containerEl.createEl("h3", { text: "AI Index" });
+    this.renderLastIndexResult(containerEl);
+
     new Setting(containerEl)
       .setName("AI provider")
       .setDesc("Choose where bookmark AI indexing runs.")
@@ -694,6 +713,14 @@ class AiBookmarkIndexerSettingTab extends PluginSettingTab {
       });
   }
 
+  renderLastIndexResult(containerEl) {
+    const result = normalizeLastIndexResult(this.plugin.settings.lastIndexResult);
+    const text = lastIndexResultText(result);
+    const el = containerEl.createEl("div", { text });
+    el.addClass("ref-raindrop-setting-note");
+    el.addClass(result && result.limitReached ? "ref-raindrop-warning-note" : "ref-raindrop-last-result");
+  }
+
   renderAccount(containerEl, account, index) {
     const heading = containerEl.createEl("h4", { text: `${account.name || `account-${index + 1}`}` });
     heading.addClass("ref-raindrop-account-heading");
@@ -799,6 +826,7 @@ function normalizeSettings(settings) {
   merged.ignoredHosts = String(merged.ignoredHosts || "");
   merged.maxIndexPerRun = nonNegativeInt(merged.maxIndexPerRun, DEFAULT_SETTINGS.maxIndexPerRun);
   merged.indexDelayMs = nonNegativeInt(merged.indexDelayMs, DEFAULT_SETTINGS.indexDelayMs);
+  merged.lastIndexResult = normalizeLastIndexResult(merged.lastIndexResult);
   if (!Array.isArray(merged.accounts) || merged.accounts.length === 0) {
     merged.accounts = DEFAULT_SETTINGS.accounts.map((account) => Object.assign({}, account));
   }
@@ -819,6 +847,28 @@ function normalizeAiProvider(value) {
 function normalizeOutputLanguage(value) {
   const language = String(value || "ja").trim().toLowerCase();
   return ["ja", "en", "zh", "ko", "es", "fr", "de"].includes(language) ? language : "ja";
+}
+
+function normalizeLastIndexResult(value) {
+  if (!isObject(value)) return null;
+  return {
+    updated: nonNegativeInt(value.updated, 0),
+    ignored: nonNegativeInt(value.ignored, 0),
+    skipped: nonNegativeInt(value.skipped, 0),
+    failed: nonNegativeInt(value.failed, 0),
+    deferred: nonNegativeInt(value.deferred, 0),
+    limit: nonNegativeInt(value.limit, 0),
+    limitReached: Boolean(value.limitReached),
+    finishedAt: String(value.finishedAt || ""),
+    firstFailure: String(value.firstFailure || ""),
+  };
+}
+
+function lastIndexResultText(result) {
+  if (!result) return "Last AI indexing result: none yet.";
+  const base = `Last AI indexing result: updated ${result.updated}, skipped ${result.skipped}, failed ${result.failed}, deferred ${result.deferred}.`;
+  if (result.limitReached) return `${base} Deferred means safety limit ${result.limit}/run was reached; run indexing again to continue.`;
+  return base;
 }
 
 function outputLanguageName(value) {
