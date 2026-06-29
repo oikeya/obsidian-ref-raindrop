@@ -154,7 +154,7 @@ AI settings:
 - `Page request timeout seconds`: default `20`
 - `Ollama timeout seconds`: default `120`; also used for OpenAI/Gemini generation
 - `Raindrop timeout seconds`: default `30`
-- `Max AI indexes per run`: default `25`; use `0` for unlimited
+- `Max AI indexes per run`: default `50`; use `0` for unlimited only when you intentionally accept the risk of many page fetches and AI API calls in one run
 - `Delay between AI indexes milliseconds`: default `1000`; use `0` for no delay
 
 API keys are stored in Obsidian plugin settings. They are not written to bookmark notes.
@@ -207,7 +207,7 @@ Run commands from the Command Palette:
 
 Start with `Sync Raindrop bookmarks` and verify the generated Markdown before running AI indexing.
 
-Initial AI indexing is intentionally throttled. By default, RefRaindrop indexes at most 25 bookmarks per run and waits 1000 ms between page fetches. This avoids hitting many bookmarked websites in a burst during the first import.
+Initial AI indexing is intentionally throttled. By default, RefRaindrop indexes at most 50 bookmarks per run and waits 1000 ms between page fetches. This avoids hitting many bookmarked websites in a burst during the first import. If `deferred` appears in the result, the safety limit was reached; run the same indexing command again to continue. Setting `Max AI indexes per run` to `0` disables this per-run cap and may cause many external page fetches and AI API calls, so use it only deliberately.
 
 Raindrop API rate limits are retried automatically for HTTP 429 and temporary 5xx responses. If Raindrop sends `Retry-After`, RefRaindrop waits for it, capped at 120 seconds.
 
